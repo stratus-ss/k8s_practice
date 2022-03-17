@@ -15,19 +15,42 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-// Generate a random uuid to attach to the pod name
-// so that this can be called multiple times without conflicting with previous runs
 func randomString(length int) string {
+	// Generate a random uuid to attach to the pod name
+	// so that this can be called multiple times without conflicting with previous runs
 	rand.Seed(time.Now().UnixNano())
 	b := make([]byte, length)
 	rand.Read(b)
 	return fmt.Sprintf("%x", b)[:length]
 }
 
-// Creates a debug pod from the nodeName passed in
-// Pod is based on the ose-cli pod and runs an etcd backup
-// in the future may take namespace and other arguments to make this more flexible
+func createProject(namespaceName string, client *kubernetes.Clientset) {
+	//Check to see if project exists
+	// If project doesn't exist, create it
+	// returns an error if it fails
+	namespace := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: namespaceName,
+			Labels: map[string]string{
+				"name": namespaceName,
+			},
+		},
+	}
+	_, exist_err := client.CoreV1().Namespaces().Get(context.TODO(), namespaceName, metav1.GetOptions{})
+
+	if exist_err != nil {
+		_, err := client.CoreV1().Namespaces().Create(context.TODO(), namespace, metav1.CreateOptions{})
+
+		if err != nil {
+			panic(err)
+		}
+	}
+}
+
 func createBackupPod(nodeName string, projectName string, imageURL string, pvcName string) *batchv1.Job {
+	// Creates a debug pod from the nodeName passed in
+	// Pod is based on the ose-cli pod and runs an etcd backup
+	// in the future may take namespace and other arguments to make this more flexible
 	// this command should be run as a prefix to all commands in the debug pod
 	cmd := "oc debug node/" + nodeName + " -- chroot /host"
 	// create a temporary tarball which will eventually be moved to the pod's PVC
@@ -89,6 +112,10 @@ func createBackupPod(nodeName string, projectName string, imageURL string, pvcNa
 	return (jobSpec)
 }
 
+func createMissingPVCs(namespaceName string, pvcName string, client *kubernetes.Clientset) {
+	//
+}
+
 func main() {
 	var ns, label, field string
 	flag.StringVar(&ns, "namespace", "", "namespace")
@@ -111,6 +138,9 @@ func main() {
 		fmt.Println(err)
 		return
 	}
+	// Make sure the backup area exists
+	createProject(backupProject, client)
+
 	// It should be safe to assume that at least 1 item exists since the above error should have exited the program
 	// if no results were found
 	debug_node := nodes.Items[0].Name
